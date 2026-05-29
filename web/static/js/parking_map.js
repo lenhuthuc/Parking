@@ -27,6 +27,8 @@ const ParkingMap = (() => {
       const slots = await fetch(`/api/v1/cameras/${cameraId}/slots/`)
                           .then(r => r.json());
       _layout = slots;
+      // Seed initial states from the REST response so the map draws immediately
+      _states = slots.map(s => s.state || "KHÔNG XÁC ĐỊNH");
     } catch(e) {
       console.warn("ParkingMap: could not load layout", e);
     }

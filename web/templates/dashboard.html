@@ -131,11 +131,17 @@
     switchCamera(cams[0].id);
   }
 
-  function switchCamera(cameraId) {
+  async function switchCamera(cameraId) {
     currentCameraId = parseInt(cameraId);
     connectWebSockets(currentCameraId);
     loadSummary(currentCameraId);
     loadOccupancyChart(currentCameraId);
+    // Eagerly draw the parking map without waiting for a WS message
+    ParkingMap.init("parking-map");
+    window._mapInitDone = true;
+    await ParkingMap.loadLayout(currentCameraId);
+    window._mapCameraId = currentCameraId;
+    ParkingMap.draw();
   }
 
   function connectWebSockets(cameraId) {

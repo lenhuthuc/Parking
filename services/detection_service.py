@@ -19,7 +19,7 @@ from config import cfg
 from database.session import get_db
 from database import crud
 from layout import Layout, load_or_create_layout
-from preprocessor import Preprocessor, FrameSampler
+from preprocessor import Preprocessor
 from detector import Detector
 from logic import ParkingLogic, SlotState
 from visualizer import Visualizer
@@ -40,7 +40,6 @@ class FrameSnapshot:
     total: int
     fps: float
     alerts: List[Dict[str, Any]] = field(default_factory=list)
-    jpeg_bytes: Optional[bytes] = None   # annotated frame as JPEG
 
 
 # ─────────────────────── worker ─────────────────────────────────
@@ -70,6 +69,12 @@ class DetectionWorker:
 
         # Track previous states to detect transitions
         self._prev_states: List[Optional[SlotState]] = []
+
+        # Latest snapshot — read by state WS without consuming the video queue
+        self.latest_snapshot: Optional[FrameSnapshot] = None
+
+        # Separate queue for full-FPS annotated JPEG frames (video display only)
+        self.video_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=8)
 
         # Hourly stats accumulator
         self._stat_accumulator: List[FrameSnapshot] = []
@@ -153,63 +158,89 @@ class DetectionWorker:
         self._viz   = Visualizer(self._layout)
 
     def _loop(self, source) -> None:
-        sampler = FrameSampler(source, target_fps=cfg.camera.sample_fps)
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video source: {source}")
+
+        native_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        # How often to run YOLO inference
+        sample_step = max(1, int(round(native_fps / cfg.camera.sample_fps)))
+        # How often to encode + push a display frame
+        display_fps = getattr(cfg.camera, "display_fps", 15.0)
+        display_step = max(1, int(round(native_fps / display_fps)))
+
         fps_times: List[float] = []
+        frame_idx = 0
+
+        # Cached results reused on non-inference frames
+        cached_states: List[SlotState] = [SlotState.EMPTY] * len(self._layout.slots)
+        cached_detections: List = []
+        cached_alerts_raw: List = []
 
         try:
-            for frame in sampler:
-                if self._stop_event.is_set():
+            while not self._stop_event.is_set():
+                ret, frame = cap.read()
+                if not ret:
                     break
 
-                t0 = time.perf_counter()
+                # ── Inference (every sample_step frames) ──────────────── #
+                if frame_idx % sample_step == 0:
+                    tensor, scale, pad = self._preprocessor.preprocess(frame)
+                    cached_detections = self._detector.detect(tensor, scale, pad)
+                    cached_states, cached_alerts_raw = self._logic.process_frame(
+                        cached_detections, frame
+                    )
 
-                tensor, scale, pad = self._preprocessor.preprocess(frame)
-                detections = self._detector.detect(tensor, scale, pad)
-                states, alerts = self._logic.process_frame(detections, frame)
+                    fps_times.append(time.perf_counter())
+                    if len(fps_times) > 30:
+                        fps_times.pop(0)
+                    fps = (len(fps_times) - 1) / (fps_times[-1] - fps_times[0]) \
+                        if len(fps_times) > 1 else 0.0
 
-                annotated = self._viz.render(frame, states, detections, alerts)
-                _, jpeg_buf = cv2.imencode(
-                    ".jpg", annotated,
-                    [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality]
-                )
+                    free     = sum(1 for s in cached_states if s == SlotState.EMPTY)
+                    occupied = sum(1 for s in cached_states if s == SlotState.OCCUPIED)
+                    unknown  = sum(1 for s in cached_states if s == SlotState.UNKNOWN)
 
-                fps_times.append(time.perf_counter())
-                if len(fps_times) > 30:
-                    fps_times.pop(0)
-                fps = (len(fps_times) - 1) / (fps_times[-1] - fps_times[0]) \
-                    if len(fps_times) > 1 else 0.0
+                    snap = FrameSnapshot(
+                        camera_id  = self.camera_id,
+                        timestamp  = datetime.datetime.utcnow(),
+                        states     = [s.value for s in cached_states],
+                        free       = free,
+                        occupied   = occupied,
+                        unknown    = unknown,
+                        total      = len(cached_states),
+                        fps        = fps,
+                        alerts     = [
+                            {"zone_id": a.zone_id, "confidence": a.confidence,
+                             "bbox": list(a.bbox)}
+                            for a in cached_alerts_raw
+                        ],
+                    )
+                    self.latest_snapshot = snap
+                    try:
+                        self.out_queue.put_nowait(snap)
+                    except queue.Full:
+                        pass
+                    self._persist(cached_states, cached_alerts_raw, snap)
 
-                free     = sum(1 for s in states if s == SlotState.EMPTY)
-                occupied = sum(1 for s in states if s == SlotState.OCCUPIED)
-                unknown  = sum(1 for s in states if s == SlotState.UNKNOWN)
+                # ── Video display (every display_step frames) ─────────── #
+                if frame_idx % display_step == 0:
+                    annotated = self._viz.render(
+                        frame, cached_states, cached_detections, []
+                    )
+                    _, jpeg_buf = cv2.imencode(
+                        ".jpg", annotated,
+                        [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality]
+                    )
+                    try:
+                        self.video_queue.put_nowait(jpeg_buf.tobytes())
+                    except queue.Full:
+                        pass
 
-                snap = FrameSnapshot(
-                    camera_id  = self.camera_id,
-                    timestamp  = datetime.datetime.utcnow(),
-                    states     = [s.value for s in states],
-                    free       = free,
-                    occupied   = occupied,
-                    unknown    = unknown,
-                    total      = len(states),
-                    fps        = fps,
-                    alerts     = [
-                        {"zone_id": a.zone_id, "confidence": a.confidence,
-                         "bbox": list(a.bbox)}
-                        for a in alerts
-                    ],
-                    jpeg_bytes = jpeg_buf.tobytes(),
-                )
-
-                # Non-blocking push; drop frame if consumer is slow
-                try:
-                    self.out_queue.put_nowait(snap)
-                except queue.Full:
-                    pass
-
-                self._persist(states, alerts, snap)
+                frame_idx += 1
 
         finally:
-            sampler.release()
+            cap.release()
 
     def _persist(self, states: List[SlotState],
                  alerts, snap: FrameSnapshot) -> None:
@@ -305,6 +336,14 @@ class DetectionManager:
 
     def get_queue(self, camera_id: int) -> Optional["queue.Queue[FrameSnapshot]"]:
         return self._queues.get(camera_id)
+
+    def get_video_queue(self, camera_id: int) -> Optional["queue.Queue[bytes]"]:
+        worker = self._workers.get(camera_id)
+        return worker.video_queue if worker else None
+
+    def get_latest_snapshot(self, camera_id: int) -> Optional[FrameSnapshot]:
+        worker = self._workers.get(camera_id)
+        return worker.latest_snapshot if worker else None
 
     def status(self) -> Dict[int, bool]:
         return {cid: w.running for cid, w in self._workers.items()}

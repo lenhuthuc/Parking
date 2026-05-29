@@ -41,15 +41,11 @@ def summary(camera_id: int, db: Session = Depends(get_db_fastapi)):
     viol_today = crud.violation_count_today(db, camera_id)
 
     free = occupied = unknown = 0
-    q = detection_manager.get_queue(camera_id)
-    if q is not None:
-        try:
-            snap = list(q.queue)[-1]
-            free     = snap.free
-            occupied = snap.occupied
-            unknown  = snap.unknown
-        except (IndexError, AttributeError):
-            pass
+    snap = detection_manager.get_latest_snapshot(camera_id)
+    if snap is not None:
+        free     = snap.free
+        occupied = snap.occupied
+        unknown  = snap.unknown
 
     return SummaryOut(
         camera_id=camera_id,

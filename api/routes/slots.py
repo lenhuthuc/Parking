@@ -16,6 +16,7 @@ class SlotStateOut(BaseModel):
     slot_id: str
     state: str
     zone: str
+    polygon: list = []
 
 
 class SlotHistoryItem(BaseModel):
@@ -48,8 +49,9 @@ def list_slot_states(camera_id: int, db: Session = Depends(get_db_fastapi)):
     for slot in slots:
         result.append(SlotStateOut(
             slot_id=slot.slot_id,
-            state=live_states.get(slot.slot_id, "UNKNOWN"),
+            state=live_states.get(slot.slot_id, "KHÔNG XÁC ĐỊNH"),
             zone=slot.zone,
+            polygon=slot.polygon or [],
         ))
     return result
 

@@ -5,6 +5,7 @@ JSON snapshots as the detection worker produces them.
 """
 from __future__ import annotations
 import asyncio
+import base64
 import json
 import logging
 import queue
@@ -56,25 +57,24 @@ ws_manager = ConnectionManager()
 async def camera_ws_endpoint(websocket: WebSocket, camera_id: int) -> None:
     """
     FastAPI endpoint handler.
-    Polls the detection queue and streams snapshots to the client.
+    Reads the latest snapshot (non-destructive) so it does not compete
+    with the video WebSocket which consumes the queue for JPEG frames.
     """
     await ws_manager.connect(websocket, camera_id)
 
     # Ensure worker is running
-    q = detection_manager.get_queue(camera_id)
-    if q is None:
-        q = detection_manager.start_camera(camera_id)
+    if detection_manager.get_queue(camera_id) is None:
+        detection_manager.start_camera(camera_id)
 
+    last_ts = None
     try:
         while True:
-            # Drain the queue (non-blocking); yield if nothing ready
-            snap: FrameSnapshot | None = None
-            try:
-                snap = q.get_nowait()
-            except queue.Empty:
+            snap = detection_manager.get_latest_snapshot(camera_id)
+            if snap is None or snap.timestamp == last_ts:
                 await asyncio.sleep(0.1)
                 continue
 
+            last_ts = snap.timestamp
             payload = {
                 "camera_id": snap.camera_id,
                 "timestamp": snap.timestamp.isoformat(),
@@ -94,33 +94,39 @@ async def camera_ws_endpoint(websocket: WebSocket, camera_id: int) -> None:
 
 async def mjpeg_stream_endpoint(websocket: WebSocket, camera_id: int) -> None:
     """
-    Streams annotated JPEG frames as base64 over WebSocket
-    for the live video panel in the dashboard.
+    Streams full-FPS annotated JPEG frames as base64 over WebSocket.
+    Video display is decoupled from inference rate: frames are rendered
+    at display_fps (settings.yaml) while YOLO runs at sample_fps.
     """
-    import base64
     await ws_manager.connect(websocket, camera_id)
 
-    q = detection_manager.get_queue(camera_id)
-    if q is None:
-        q = detection_manager.start_camera(camera_id)
+    if detection_manager.get_queue(camera_id) is None:
+        detection_manager.start_camera(camera_id)
+
+    vq = detection_manager.get_video_queue(camera_id)
 
     try:
         while True:
-            snap: FrameSnapshot | None = None
-            try:
-                snap = q.get_nowait()
-            except queue.Empty:
+            if vq is None:
+                vq = detection_manager.get_video_queue(camera_id)
                 await asyncio.sleep(0.05)
                 continue
 
-            if snap.jpeg_bytes:
-                b64 = base64.b64encode(snap.jpeg_bytes).decode()
-                await websocket.send_text(json.dumps({
-                    "type":      "frame",
-                    "camera_id": snap.camera_id,
-                    "fps":       round(snap.fps, 1),
-                    "data":      b64,
-                }))
+            try:
+                jpeg_bytes: bytes = vq.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.02)
+                continue
+
+            snap = detection_manager.get_latest_snapshot(camera_id)
+            fps = round(snap.fps, 1) if snap else 0.0
+
+            await websocket.send_text(json.dumps({
+                "type":      "frame",
+                "camera_id": camera_id,
+                "fps":       fps,
+                "data":      base64.b64encode(jpeg_bytes).decode(),
+            }))
 
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket, camera_id)

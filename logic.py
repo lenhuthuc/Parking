@@ -25,13 +25,13 @@ from layout import SlotDef, ZoneDef
 
 # ─────────────────────────── constants ──────────────────────────────
 
-IOU_LO   = 0.30
-IOU_HI   = 0.50
-CONF_LO  = 0.50
-CONF_HI  = 0.70
+IOU_LO   = 0.15
+IOU_HI   = 0.30
+CONF_LO  = 0.25
+CONF_HI  = 0.45
 OCC_THR  = 0.60   # occlusion threshold
 
-TAU_PARK  = 5.0   # seconds: consecutive "occupied" before slot → OCCUPIED
+TAU_PARK  = 2.0   # seconds: consecutive "occupied" before slot → OCCUPIED
 TAU_LEAVE = 3.0   # seconds: consecutive "empty"    before slot → EMPTY
 TAU_UNK   = 1.5   # seconds: consecutive "unknown"  before slot → UNKNOWN
 TAU_VIOL  = 30.0  # seconds: dwell in no-park zone before alert
@@ -110,6 +110,7 @@ class MatchResult:
     best_det: Optional[Detection]
     best_iou: float
     occlusion: float   # fraction of slot area covered by *other* boxes
+    anchor_inside: bool = False
 
 
 def match_slot(slot: SlotDef,
@@ -123,6 +124,7 @@ def match_slot(slot: SlotDef,
     """
     best_det: Optional[Detection] = None
     best_iou = 0.0
+    best_anchor_inside = False
     occlusion_area = 0.0
 
     for idx in candidate_indices:
@@ -132,7 +134,7 @@ def match_slot(slot: SlotDef,
         anchor_inside = point_in_polygon(anchor[0], anchor[1], slot.polygon)
 
         if anchor_inside or iou > 0:
-            if iou > best_iou:
+            if iou > best_iou or (anchor_inside and not best_anchor_inside):
                 # Demote current best to occlusion if it exists
                 if best_det is not None:
                     from geometry import sutherland_hodgman, bbox_to_polygon
@@ -144,6 +146,7 @@ def match_slot(slot: SlotDef,
                         occlusion_area += _sa(inter)
                 best_iou = iou
                 best_det = det
+                best_anchor_inside = anchor_inside
             else:
                 # This box occludes the slot but is not the winner
                 from geometry import sutherland_hodgman, bbox_to_polygon
@@ -155,28 +158,32 @@ def match_slot(slot: SlotDef,
                     occlusion_area += _sa(inter)
 
     occ_ratio = min(occlusion_area / slot.area, 1.0) if slot.area > 0 else 0.0
-    return MatchResult(best_det, best_iou, occ_ratio)
+    return MatchResult(best_det, best_iou, occ_ratio, best_anchor_inside)
 
 
 # ─────────────────────────── raw-state rule ─────────────────────────
 
-def decide_raw_state(iou: float, conf: float, occ: float) -> RawState:
+def decide_raw_state(iou: float, conf: float, occ: float,
+                     anchor_inside: bool = False) -> RawState:
     """
     3-class threshold classifier.
     Order of checks is deliberate (CÓ XE first, TRỐNG last).
     """
+    # Anchor inside slot + sufficient confidence is the strongest signal
+    if anchor_inside and conf >= CONF_LO:
+        return RawState.OCCUPIED
+
     if iou >= IOU_HI and conf >= CONF_HI:
         return RawState.OCCUPIED
 
+    # Any meaningful overlap or confidence → uncertain (fixes gap where
+    # high-iou + low-conf was incorrectly classified as EMPTY)
     if (occ > OCC_THR
-            or (CONF_LO <= conf < CONF_HI)
-            or (IOU_LO <= iou < IOU_HI)):
+            or conf >= CONF_LO
+            or iou >= IOU_LO):
         return RawState.UNKNOWN
 
-    if iou < IOU_LO or conf < CONF_LO:
-        return RawState.EMPTY
-
-    return RawState.UNKNOWN   # catch-all safety net
+    return RawState.EMPTY
 
 
 # ─────────────────────────── per-slot FSM ───────────────────────────
@@ -339,7 +346,8 @@ class ParkingLogic:
             match = match_slot(slot, detections, cand_idx)
 
             conf = match.best_det.confidence if match.best_det else 0.0
-            raw = decide_raw_state(match.best_iou, conf, match.occlusion)
+            raw = decide_raw_state(match.best_iou, conf, match.occlusion,
+                                   match.anchor_inside)
 
             self._slot_mem[i] = update_state_machine(
                 self._slot_mem[i], raw,

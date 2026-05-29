@@ -4,7 +4,8 @@ system:
 
 camera:
   default_source: 0          # 0 = webcam, or path to video file / RTSP URL
-  sample_fps: 2.0            # detection FPS (1–5 recommended)
+  sample_fps: 2.0            # detection/inference FPS (1–5 recommended)
+  display_fps: 15.0          # video stream FPS sent to UI (independent of inference)
   display_scale: 1.0
 
 model:
