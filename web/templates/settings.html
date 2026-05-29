@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Cài đặt — Parking Detection{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>⚙ Cài đặt</h1>
+</div>
+
+<div class="settings-grid">
+  <!-- Add camera -->
+  <div class="panel">
+    <div class="panel-header">📷 Thêm camera</div>
+    <div class="panel-body">
+      <form id="add-cam-form" onsubmit="addCamera(event)">
+        <div class="form-group">
+          <label>Tên camera</label>
+          <input type="text" id="cam-name" placeholder="Bãi xe tầng 1" required>
+        </div>
+        <div class="form-group">
+          <label>Nguồn (index / đường dẫn / RTSP)</label>
+          <input type="text" id="cam-source" placeholder="0 hoặc rtsp://..." required>
+        </div>
+        <div class="form-group">
+          <label>Layout file</label>
+          <input type="text" id="cam-layout" value="layout.json">
+        </div>
+        <button type="submit" class="btn btn-primary">➕ Thêm</button>
+      </form>
+      <div id="add-cam-msg" class="msg hidden"></div>
+    </div>
+  </div>
+
+  <!-- Camera list -->
+  <div class="panel">
+    <div class="panel-header">Danh sách camera</div>
+    <div class="panel-body">
+      <table class="data-table" id="cam-table">
+        <thead>
+          <tr><th>ID</th><th>Tên</th><th>Nguồn</th>
+              <th>Trạng thái</th><th>Thao tác</th></tr>
+        </thead>
+        <tbody id="cam-tbody">
+          <tr><td colspan="5" class="empty-msg">Đang tải...</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Alert settings info -->
+  <div class="panel span-2">
+    <div class="panel-header">🔔 Cấu hình cảnh báo</div>
+    <div class="panel-body">
+      <p class="muted">Chỉnh sửa file <code>config/settings.yaml</code> để cấu hình email và Telegram:</p>
+      <pre class="code-block">alerts:
+  email:
+    enabled: true
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    sender: "your_email@gmail.com"
+    recipients: ["guard@example.com"]
+  telegram:
+    enabled: true
+    chat_id: "YOUR_CHAT_ID"
+
+# Đặt mật khẩu qua biến môi trường:
+# ALERT_EMAIL_PASSWORD=xxx
+# TELEGRAM_BOT_TOKEN=xxx</pre>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  window.addEventListener("DOMContentLoaded", loadCameraList);
+
+  async function loadCameraList() {
+    const cams = await fetch("/api/v1/cameras/").then(r => r.json());
+    const tbody = document.getElementById("cam-tbody");
+    tbody.innerHTML = "";
+    if (cams.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" class="empty-msg">Chưa có camera</td></tr>';
+      return;
+    }
+    cams.forEach(c => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${c.id}</td>
+        <td>${c.name}</td>
+        <td class="muted">${c.source}</td>
+        <td><span class="badge ${c.running ? 'green' : 'gray'}">
+          ${c.running ? 'Đang chạy' : 'Dừng'}</span></td>
+        <td>
+          ${!c.running
+            ? `<button class="btn btn-sm btn-primary"
+                 onclick="camAction(${c.id},'start')">▶ Start</button>`
+            : `<button class="btn btn-sm btn-danger"
+                 onclick="camAction(${c.id},'stop')">■ Stop</button>`}
+          <button class="btn btn-sm btn-danger"
+            onclick="if(confirm('Xóa camera?'))camAction(${c.id},'delete')">🗑</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function camAction(id, action) {
+    const method = action === "delete" ? "DELETE" : "POST";
+    const url = action === "delete"
+      ? `/api/v1/cameras/${id}`
+      : `/api/v1/cameras/${id}/${action}`;
+    await fetch(url, {method});
+    loadCameraList();
+  }
+
+  async function addCamera(e) {
+    e.preventDefault();
+    const body = {
+      name:        document.getElementById("cam-name").value,
+      source:      document.getElementById("cam-source").value,
+      layout_path: document.getElementById("cam-layout").value,
+    };
+    const res = await fetch("/api/v1/cameras/", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const msg = document.getElementById("add-cam-msg");
+    msg.classList.remove("hidden");
+    if (res.ok) {
+      msg.className = "msg success";
+      msg.textContent = "✓ Đã thêm camera thành công!";
+      document.getElementById("add-cam-form").reset();
+      loadCameraList();
+    } else {
+      msg.className = "msg error";
+      msg.textContent = "✗ Lỗi khi thêm camera.";
+    }
+    setTimeout(() => msg.classList.add("hidden"), 4000);
+  }
+</script>
+{% endblock %}

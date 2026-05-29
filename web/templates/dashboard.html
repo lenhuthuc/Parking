@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Parking Detection{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Dashboard</h1>
+  <div class="header-controls">
+    <label for="cam-select">Camera:</label>
+    <select id="cam-select" onchange="switchCamera(this.value)"></select>
+    <button class="btn btn-primary" onclick="startCamera()">▶ Start</button>
+    <button class="btn btn-danger"  onclick="stopCamera()">■ Stop</button>
+  </div>
+</div>
+
+<!-- Summary cards -->
+<div class="stats-grid">
+  <div class="stat-card green">
+    <div class="stat-value" id="cnt-free">—</div>
+    <div class="stat-label">Chỗ trống</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-value" id="cnt-occ">—</div>
+    <div class="stat-label">Có xe</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-value" id="cnt-unk">—</div>
+    <div class="stat-label">Không xác định</div>
+  </div>
+  <div class="stat-card blue">
+    <div class="stat-value" id="cnt-total">—</div>
+    <div class="stat-label">Tổng ô</div>
+  </div>
+  <div class="stat-card yellow">
+    <div class="stat-value" id="cnt-viol">—</div>
+    <div class="stat-label">Vi phạm hôm nay</div>
+  </div>
+  <div class="stat-card gray">
+    <div class="stat-value" id="fps-display">—</div>
+    <div class="stat-label">FPS</div>
+  </div>
+</div>
+
+<!-- Main content area -->
+<div class="dashboard-grid">
+  <!-- Live video feed -->
+  <div class="panel">
+    <div class="panel-header">
+      <span>📷 Live Feed</span>
+      <span class="badge" id="stream-status">—</span>
+    </div>
+    <div class="panel-body video-container">
+      <img id="live-frame" src="/static/img/placeholder.svg"
+           alt="Live feed" class="live-feed">
+    </div>
+  </div>
+
+  <!-- Parking map (canvas) -->
+  <div class="panel">
+    <div class="panel-header">
+      <span>🗺 Sơ đồ bãi xe</span>
+      <div class="legend">
+        <span class="legend-item green">Trống</span>
+        <span class="legend-item red">Có xe</span>
+        <span class="legend-item orange">N/A</span>
+      </div>
+    </div>
+    <div class="panel-body">
+      <canvas id="parking-map" width="600" height="400"></canvas>
+    </div>
+  </div>
+
+  <!-- Occupancy mini chart -->
+  <div class="panel span-2">
+    <div class="panel-header">
+      <span>📈 Tỉ lệ lấp đầy (24h)</span>
+    </div>
+    <div class="panel-body">
+      <canvas id="occupancy-chart" height="120"></canvas>
+    </div>
+  </div>
+
+  <!-- Recent alerts -->
+  <div class="panel span-2">
+    <div class="panel-header">
+      <span>🚨 Cảnh báo gần đây</span>
+      <a href="/violations" class="btn btn-sm">Xem tất cả</a>
+    </div>
+    <div class="panel-body">
+      <table class="data-table" id="alerts-table">
+        <thead>
+          <tr><th>Thời gian</th><th>Camera</th><th>Vùng</th>
+              <th>Độ tin cậy</th><th>Thao tác</th></tr>
+        </thead>
+        <tbody id="alerts-tbody">
+          <tr><td colspan="5" class="empty-msg">Chưa có cảnh báo</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/parking_map.js"></script>
+<script src="/static/js/charts.js"></script>
+<script>
+  let currentCameraId = null;
+  let stateWs = null;
+  let videoWs = null;
+
+  window.addEventListener("DOMContentLoaded", () => {
+    loadCameras();
+    loadRecentAlerts();
+  });
+
+  async function loadCameras() {
+    const res = await fetch("/api/v1/cameras/");
+    const cams = await res.json();
+    const sel = document.getElementById("cam-select");
+    sel.innerHTML = "";
+    if (cams.length === 0) {
+      sel.innerHTML = '<option value="">— Chưa có camera —</option>';
+      return;
+    }
+    cams.forEach(c => {
+      const opt = document.createElement("option");
+      opt.value = c.id;
+      opt.textContent = `[${c.id}] ${c.name}`;
+      sel.appendChild(opt);
+    });
+    switchCamera(cams[0].id);
+  }
+
+  function switchCamera(cameraId) {
+    currentCameraId = parseInt(cameraId);
+    connectWebSockets(currentCameraId);
+    loadSummary(currentCameraId);
+    loadOccupancyChart(currentCameraId);
+  }
+
+  function connectWebSockets(cameraId) {
+    if (stateWs) stateWs.close();
+    if (videoWs) videoWs.close();
+
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+
+    // State WebSocket
+    stateWs = new WebSocket(`${proto}://${location.host}/ws/cameras/${cameraId}/state`);
+    stateWs.onopen  = () => setConnStatus(true);
+    stateWs.onclose = () => setConnStatus(false);
+    stateWs.onmessage = e => handleStateUpdate(JSON.parse(e.data));
+
+    // Video WebSocket
+    videoWs = new WebSocket(`${proto}://${location.host}/ws/cameras/${cameraId}/video`);
+    videoWs.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      if (msg.type === "frame") {
+        document.getElementById("live-frame").src =
+          "data:image/jpeg;base64," + msg.data;
+        document.getElementById("fps-display").textContent =
+          msg.fps.toFixed(1);
+      }
+    };
+  }
+
+  function handleStateUpdate(snap) {
+    document.getElementById("cnt-free").textContent  = snap.free;
+    document.getElementById("cnt-occ").textContent   = snap.occupied;
+    document.getElementById("cnt-unk").textContent   = snap.unknown;
+    document.getElementById("cnt-total").textContent = snap.total;
+    document.getElementById("fps-display").textContent = snap.fps.toFixed(1);
+
+    updateParkingMap(snap.states, currentCameraId);
+
+    if (snap.alerts && snap.alerts.length > 0) {
+      snap.alerts.forEach(a => appendAlert(snap.timestamp, a));
+    }
+  }
+
+  async function loadSummary(cameraId) {
+    try {
+      const res = await fetch(`/api/v1/stats/cameras/${cameraId}/summary`);
+      const s = await res.json();
+      document.getElementById("cnt-free").textContent  = s.free;
+      document.getElementById("cnt-occ").textContent   = s.occupied;
+      document.getElementById("cnt-unk").textContent   = s.unknown;
+      document.getElementById("cnt-total").textContent = s.total_slots;
+      document.getElementById("cnt-viol").textContent  = s.violations_today;
+    } catch(e) {}
+  }
+
+  async function loadRecentAlerts() {
+    try {
+      const res = await fetch("/api/v1/violations/?limit=5");
+      const rows = await res.json();
+      const tbody = document.getElementById("alerts-tbody");
+      if (rows.length === 0) return;
+      tbody.innerHTML = "";
+      rows.forEach(v => {
+        const tr = document.createElement("tr");
+        const ts = new Date(v.recorded_at + "Z").toLocaleString("vi-VN");
+        tr.innerHTML = `
+          <td>${ts}</td>
+          <td>${v.camera_id}</td>
+          <td>${v.zone_id}</td>
+          <td>${(v.confidence * 100).toFixed(0)}%</td>
+          <td>
+            ${v.snapshot_path
+              ? `<a href="/api/v1/violations/${v.id}/snapshot" target="_blank"
+                    class="btn btn-sm">Ảnh</a>` : ""}
+            ${!v.acknowledged
+              ? `<button class="btn btn-sm btn-success"
+                         onclick="ackViolation(${v.id}, this)">✓ Xác nhận</button>`
+              : '<span class="badge green">Đã xác nhận</span>'}
+          </td>`;
+        tbody.appendChild(tr);
+      });
+    } catch(e) {}
+  }
+
+  function appendAlert(timestamp, alert) {
+    const tbody = document.getElementById("alerts-tbody");
+    const empty = tbody.querySelector(".empty-msg");
+    if (empty) empty.parentElement.remove();
+
+    const tr = document.createElement("tr");
+    tr.className = "new-alert";
+    const ts = new Date(timestamp + "Z").toLocaleString("vi-VN");
+    tr.innerHTML = `
+      <td>${ts}</td>
+      <td>${currentCameraId}</td>
+      <td>${alert.zone_id}</td>
+      <td>${(alert.confidence * 100).toFixed(0)}%</td>
+      <td>—</td>`;
+    tbody.prepend(tr);
+    setTimeout(() => tr.classList.remove("new-alert"), 3000);
+
+    // Keep max 10 rows
+    while (tbody.rows.length > 10) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  async function ackViolation(id, btn) {
+    await fetch(`/api/v1/violations/${id}/acknowledge`, {method: "POST",
+      headers: {"Content-Type": "application/json"}, body: "{}"});
+    btn.replaceWith(Object.assign(document.createElement("span"),
+      {className: "badge green", textContent: "Đã xác nhận"}));
+  }
+
+  async function startCamera() {
+    if (!currentCameraId) return;
+    await fetch(`/api/v1/cameras/${currentCameraId}/start`, {method: "POST"});
+    connectWebSockets(currentCameraId);
+  }
+
+  async function stopCamera() {
+    if (!currentCameraId) return;
+    await fetch(`/api/v1/cameras/${currentCameraId}/stop`, {method: "POST"});
+    if (stateWs) stateWs.close();
+    if (videoWs) videoWs.close();
+    setConnStatus(false);
+  }
+
+  function setConnStatus(online) {
+    const ind = document.getElementById("conn-indicator");
+    const lbl = document.getElementById("conn-label");
+    ind.className = "indicator " + (online ? "online" : "offline");
+    lbl.textContent = online ? "Online" : "Offline";
+  }
+
+  document.getElementById("stream-status").textContent = "Live";
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Parking Detection{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/dashboard.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-brand">🚗 Parking Detection</div>
+    <div class="nav-links">
+      <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+      <a href="/violations" class="nav-link {% if request.url.path == '/violations' %}active{% endif %}">Vi phạm</a>
+      <a href="/statistics" class="nav-link {% if request.url.path == '/statistics' %}active{% endif %}">Thống kê</a>
+      <a href="/settings" class="nav-link {% if request.url.path == '/settings' %}active{% endif %}">Cài đặt</a>
+    </div>
+    <div class="nav-status">
+      <span id="conn-indicator" class="indicator offline"></span>
+      <span id="conn-label">Offline</span>
+    </div>
+  </nav>
+
+  <main class="main-content">
+    {% block content %}{% endblock %}
+  </main>
+
+  <script src="/static/js/dashboard.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

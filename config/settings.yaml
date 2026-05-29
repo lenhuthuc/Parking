@@ -1,0 +1,64 @@
+system:
+  name: "Parking Detection System"
+  version: "1.0.0"
+
+camera:
+  default_source: 0          # 0 = webcam, or path to video file / RTSP URL
+  sample_fps: 2.0            # detection FPS (1–5 recommended)
+  display_scale: 1.0
+
+model:
+  path: "yolov8n.pt"
+  device: "cpu"              # "cpu" or "cuda:0"
+  confidence_threshold: 0.25
+  iou_nms: 0.45
+  target_classes: [3]        # COCO: 3 = motorcycle
+
+layout:
+  path: "layout.json"
+
+# ── Decision thresholds (M4) ─────────────────────────────────────
+thresholds:
+  iou_lo:    0.30
+  iou_hi:    0.50
+  conf_lo:   0.50
+  conf_hi:   0.70
+  occlusion: 0.60
+
+# ── Timing (seconds) ─────────────────────────────────────────────
+timing:
+  tau_park:  5.0     # dwell to confirm OCCUPIED
+  tau_leave: 3.0     # dwell to confirm EMPTY
+  tau_unk:   1.5     # dwell to enter UNKNOWN
+  tau_viol:  30.0    # dwell in no-park zone before alert
+
+# ── Database ─────────────────────────────────────────────────────
+database:
+  url: "sqlite:///parking.db"
+  echo: false
+
+# ── Web server ───────────────────────────────────────────────────
+server:
+  host: "0.0.0.0"
+  port: 8000
+  reload: false
+
+# ── Alerts ───────────────────────────────────────────────────────
+alerts:
+  email:
+    enabled: false
+    smtp_host: "smtp.gmail.com"
+    smtp_port: 587
+    sender: "your_email@gmail.com"
+    password: ""               # set via env: ALERT_EMAIL_PASSWORD
+    recipients: []
+
+  telegram:
+    enabled: false
+    bot_token: ""              # set via env: TELEGRAM_BOT_TOKEN
+    chat_id: ""
+
+# ── Export ───────────────────────────────────────────────────────
+export:
+  output_dir: "exports"
+  violation_snapshots_dir: "snapshots"

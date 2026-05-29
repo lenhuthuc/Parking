@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Vi phạm — Parking Detection{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>🚨 Lịch sử vi phạm</h1>
+  <div class="header-controls">
+    <label>Thời gian:</label>
+    <select id="since-select" onchange="loadViolations()">
+      <option value="24">24 giờ qua</option>
+      <option value="72">3 ngày qua</option>
+      <option value="168">7 ngày qua</option>
+      <option value="720">30 ngày qua</option>
+    </select>
+    <label><input type="checkbox" id="unacked-only" onchange="loadViolations()"> Chưa xác nhận</label>
+    <a id="export-csv" href="#" class="btn btn-secondary" onclick="exportCSV(event)">
+      ⬇ Xuất CSV
+    </a>
+  </div>
+</div>
+
+<!-- Summary bar -->
+<div class="stats-grid mini">
+  <div class="stat-card red">
+    <div class="stat-value" id="viol-total">—</div>
+    <div class="stat-label">Tổng vi phạm</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-value" id="viol-unacked">—</div>
+    <div class="stat-label">Chưa xác nhận</div>
+  </div>
+</div>
+
+<!-- Violation table -->
+<div class="panel">
+  <div class="panel-body">
+    <table class="data-table" id="viol-table">
+      <thead>
+        <tr>
+          <th>ID</th><th>Thời gian</th><th>Camera</th><th>Vùng</th>
+          <th>Độ tin cậy</th><th>Ảnh bằng chứng</th><th>Trạng thái</th><th>Thao tác</th>
+        </tr>
+      </thead>
+      <tbody id="viol-tbody">
+        <tr><td colspan="8" class="empty-msg">Đang tải...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Snapshot modal -->
+<div id="snapshot-modal" class="modal hidden">
+  <div class="modal-backdrop" onclick="closeModal()"></div>
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <img id="snapshot-img" src="" alt="Ảnh bằng chứng" style="max-width:100%">
+    <div id="snapshot-meta" class="modal-meta"></div>
+    <textarea id="ack-notes" placeholder="Ghi chú (tuỳ chọn)..." rows="2"></textarea>
+    <button class="btn btn-success" onclick="doAck()">✓ Xác nhận vi phạm này</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let selectedViolId = null;
+  let allViolations = [];
+
+  window.addEventListener("DOMContentLoaded", loadViolations);
+
+  async function loadViolations() {
+    const since = document.getElementById("since-select").value;
+    const unacked = document.getElementById("unacked-only").checked;
+    const url = `/api/v1/violations/?since_hours=${since}&limit=500`
+      + (unacked ? "&unacked_only=true" : "");
+    const rows = await fetch(url).then(r => r.json());
+    allViolations = rows;
+
+    const tbody = document.getElementById("viol-tbody");
+    tbody.innerHTML = "";
+
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-msg">Không có vi phạm</td></tr>';
+      document.getElementById("viol-total").textContent = 0;
+      document.getElementById("viol-unacked").textContent = 0;
+      return;
+    }
+
+    const unackedCount = rows.filter(r => !r.acknowledged).length;
+    document.getElementById("viol-total").textContent   = rows.length;
+    document.getElementById("viol-unacked").textContent = unackedCount;
+
+    rows.forEach(v => {
+      const tr = document.createElement("tr");
+      const ts = new Date(v.recorded_at + "Z").toLocaleString("vi-VN");
+      tr.innerHTML = `
+        <td>${v.id}</td>
+        <td>${ts}</td>
+        <td>${v.camera_id}</td>
+        <td><span class="badge red">${v.zone_id}</span></td>
+        <td>${(v.confidence * 100).toFixed(0)}%</td>
+        <td>${v.snapshot_path
+          ? `<button class="btn btn-sm" onclick="showSnapshot(${v.id}, '${ts}')">📷 Xem</button>`
+          : '<span class="muted">—</span>'}</td>
+        <td>${v.acknowledged
+          ? '<span class="badge green">Đã xác nhận</span>'
+          : '<span class="badge orange">Chờ xử lý</span>'}</td>
+        <td>${!v.acknowledged
+          ? `<button class="btn btn-sm btn-success"
+               onclick="quickAck(${v.id}, this)">✓</button>` : ''}</td>`;
+      tbody.appendChild(tr);
+    });
+  }
+
+  function showSnapshot(violId, timestamp) {
+    selectedViolId = violId;
+    document.getElementById("snapshot-img").src =
+      `/api/v1/violations/${violId}/snapshot?ts=${Date.now()}`;
+    document.getElementById("snapshot-meta").textContent =
+      `Vi phạm #${violId} — ${timestamp}`;
+    document.getElementById("ack-notes").value = "";
+    document.getElementById("snapshot-modal").classList.remove("hidden");
+  }
+
+  function closeModal() {
+    document.getElementById("snapshot-modal").classList.add("hidden");
+    selectedViolId = null;
+  }
+
+  async function doAck() {
+    if (!selectedViolId) return;
+    const notes = document.getElementById("ack-notes").value;
+    await fetch(`/api/v1/violations/${selectedViolId}/acknowledge`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({notes}),
+    });
+    closeModal();
+    loadViolations();
+  }
+
+  async function quickAck(id, btn) {
+    await fetch(`/api/v1/violations/${id}/acknowledge`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: "{}",
+    });
+    loadViolations();
+  }
+
+  function exportCSV(e) {
+    e.preventDefault();
+    const since = document.getElementById("since-select").value;
+    window.location = `/api/v1/stats/cameras/1/export/violations.csv?since_hours=${since}`;
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% block title %}Thống kê — Parking Detection{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>📊 Thống kê</h1>
+  <div class="header-controls">
+    <label for="stat-cam">Camera:</label>
+    <select id="stat-cam" onchange="loadAll()"></select>
+    <label for="stat-range">Khoảng thời gian:</label>
+    <select id="stat-range" onchange="loadAll()">
+      <option value="24">24 giờ</option>
+      <option value="72">3 ngày</option>
+      <option value="168" selected>7 ngày</option>
+      <option value="720">30 ngày</option>
+    </select>
+    <a href="#" onclick="exportExcel(event)" class="btn btn-secondary">⬇ Excel</a>
+    <a href="#" onclick="exportCSV(event)"   class="btn btn-secondary">⬇ CSV</a>
+  </div>
+</div>
+
+<!-- KPI cards -->
+<div class="stats-grid">
+  <div class="stat-card blue">
+    <div class="stat-value" id="kpi-avg-occ">—</div>
+    <div class="stat-label">Tỉ lệ lấp đầy TB</div>
+  </div>
+  <div class="stat-card green">
+    <div class="stat-value" id="kpi-peak-empty">—</div>
+    <div class="stat-label">Giờ nhiều chỗ trống nhất</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-value" id="kpi-peak-occ">—</div>
+    <div class="stat-label">Giờ đông nhất</div>
+  </div>
+  <div class="stat-card yellow">
+    <div class="stat-value" id="kpi-total-viol">—</div>
+    <div class="stat-label">Tổng vi phạm</div>
+  </div>
+</div>
+
+<!-- Occupancy line chart -->
+<div class="panel">
+  <div class="panel-header"><span>Tỉ lệ lấp đầy theo giờ</span></div>
+  <div class="panel-body">
+    <canvas id="hourly-chart" height="150"></canvas>
+  </div>
+</div>
+
+<!-- Heatmap table -->
+<div class="panel">
+  <div class="panel-header"><span>Heatmap — tỉ lệ lấp đầy theo giờ trong ngày</span></div>
+  <div class="panel-body">
+    <div id="heatmap-container" class="heatmap"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/charts.js"></script>
+<script>
+  window.addEventListener("DOMContentLoaded", async () => {
+    await loadCameraList();
+    loadAll();
+  });
+
+  async function loadCameraList() {
+    const cams = await fetch("/api/v1/cameras/").then(r => r.json());
+    const sel = document.getElementById("stat-cam");
+    cams.forEach(c => {
+      const o = document.createElement("option");
+      o.value = c.id; o.textContent = `[${c.id}] ${c.name}`;
+      sel.appendChild(o);
+    });
+  }
+
+  async function loadAll() {
+    const camId = document.getElementById("stat-cam").value || 1;
+    const hours = document.getElementById("stat-range").value;
+    const [stats, viols] = await Promise.all([
+      fetch(`/api/v1/stats/cameras/${camId}/hourly?since_hours=${hours}`).then(r => r.json()),
+      fetch(`/api/v1/violations/?camera_id=${camId}&since_hours=${hours}&limit=1000`).then(r => r.json()),
+    ]);
+    updateKPIs(stats, viols);
+    drawHourlyChart(stats);
+    drawHeatmap(stats);
+  }
+
+  function updateKPIs(stats, viols) {
+    if (stats.length === 0) return;
+    const avgOcc = stats.reduce((s, r) => s + r.occupied_pct, 0) / stats.length;
+    const peakEmpty = stats.reduce((best, r) =>
+      r.empty_pct > best.empty_pct ? r : best, stats[0]);
+    const peakOcc   = stats.reduce((best, r) =>
+      r.occupied_pct > best.occupied_pct ? r : best, stats[0]);
+
+    document.getElementById("kpi-avg-occ").textContent    = avgOcc.toFixed(1) + "%";
+    document.getElementById("kpi-peak-empty").textContent =
+      new Date(peakEmpty.hour + "Z").getHours() + ":00";
+    document.getElementById("kpi-peak-occ").textContent   =
+      new Date(peakOcc.hour + "Z").getHours() + ":00";
+    document.getElementById("kpi-total-viol").textContent = viols.length;
+  }
+
+  function drawHeatmap(stats) {
+    // Group by hour-of-day (0..23)
+    const byHour = Array(24).fill(null).map(() => ({sum: 0, count: 0}));
+    stats.forEach(r => {
+      const h = new Date(r.hour + "Z").getHours();
+      byHour[h].sum += r.occupied_pct;
+      byHour[h].count++;
+    });
+
+    const container = document.getElementById("heatmap-container");
+    container.innerHTML = "";
+
+    const maxVal = Math.max(...byHour.map(b => b.count > 0 ? b.sum / b.count : 0)) || 1;
+
+    const row = document.createElement("div");
+    row.className = "heatmap-row";
+    for (let h = 0; h < 24; h++) {
+      const cell = document.createElement("div");
+      cell.className = "heatmap-cell";
+      const val = byHour[h].count > 0 ? byHour[h].sum / byHour[h].count : 0;
+      const intensity = val / maxVal;
+      const r = Math.round(255 * intensity);
+      const g = Math.round(255 * (1 - intensity));
+      cell.style.backgroundColor = `rgb(${r},${g},60)`;
+      cell.title = `${h}:00 — ${val.toFixed(1)}%`;
+      cell.textContent = h;
+      row.appendChild(cell);
+    }
+    container.appendChild(row);
+  }
+
+  function exportExcel(e) {
+    e.preventDefault();
+    const camId = document.getElementById("stat-cam").value || 1;
+    const hours = document.getElementById("stat-range").value;
+    window.location = `/api/v1/stats/cameras/${camId}/export/report.xlsx?since_hours=${hours}`;
+  }
+
+  function exportCSV(e) {
+    e.preventDefault();
+    const camId = document.getElementById("stat-cam").value || 1;
+    const hours = document.getElementById("stat-range").value;
+    window.location = `/api/v1/stats/cameras/${camId}/export/occupancy.csv?since_hours=${hours}`;
+  }
+</script>
+{% endblock %}

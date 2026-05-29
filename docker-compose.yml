@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  parking-detection:
+    build: .
+    container_name: parking-detection
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./layout.json:/app/layout.json
+      - ./parking.db:/app/parking.db
+      - ./logs:/app/logs
+      - ./exports:/app/exports
+      - ./snapshots:/app/snapshots
+      - ./config/settings.yaml:/app/config/settings.yaml
+    environment:
+      - ALERT_EMAIL_PASSWORD=${ALERT_EMAIL_PASSWORD:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    # For GPU support (uncomment if nvidia-docker is installed):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # Optional: expose camera stream via RTSP (example with IP camera proxy)
+  # rtsp-proxy:
+  #   image: aler9/rtsp-simple-server
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8554:8554"
