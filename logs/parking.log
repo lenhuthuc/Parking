@@ -28,3 +28,60 @@
 2026-05-29 13:50:26 [INFO] parking.detection: Detection worker started for camera 1
 2026-05-29 13:52:02 [INFO] parking.detection: Detection worker started for camera 1
 2026-05-29 13:53:23 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 11:55:12 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 11:55:12 [ERROR] parking.detection: Detection worker error (cam 1): Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+Traceback (most recent call last):
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 122, in _run
+    self._setup(source, layout_path)
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 134, in _setup
+    raise RuntimeError(f"Cannot read first frame from {source}")
+RuntimeError: Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+2026-05-30 11:55:16 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 11:55:16 [ERROR] parking.detection: Detection worker error (cam 1): Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+Traceback (most recent call last):
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 122, in _run
+    self._setup(source, layout_path)
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 134, in _setup
+    raise RuntimeError(f"Cannot read first frame from {source}")
+RuntimeError: Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+2026-05-30 11:56:19 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 11:56:33 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 11:56:33 [ERROR] parking.detection: Detection worker error (cam 1): Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+Traceback (most recent call last):
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 122, in _run
+    self._setup(source, layout_path)
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 134, in _setup
+    raise RuntimeError(f"Cannot read first frame from {source}")
+RuntimeError: Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+2026-05-30 11:57:26 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 11:59:53 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 11:59:53 [ERROR] parking.detection: Detection worker error (cam 1): Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+Traceback (most recent call last):
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 122, in _run
+    self._setup(source, layout_path)
+  File "C:\Users\admin\myProject\Parking Detection\services\detection_service.py", line 134, in _setup
+    raise RuntimeError(f"Cannot read first frame from {source}")
+RuntimeError: Cannot read first frame from C:\Users\admin\myProject\Parking Detection\resource\người_đỗ_xe_rồi_rời_người.mp4
+2026-05-30 12:04:30 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 12:04:37 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:05:38 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:05:52 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:06:27 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:06:35 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:07:22 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:07:29 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:10:33 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 12:59:29 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 13:07:53 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 13:10:35 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 13:40:59 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 13:41:31 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 14:02:43 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 14:06:58 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 14:08:05 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 14:11:29 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 14:23:21 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 14:23:51 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 14:25:48 [INFO] parking.detection: Detection worker stopped for camera 1
+2026-05-30 14:26:12 [INFO] parking.detection: Detection worker started for camera 1
+2026-05-30 14:27:05 [INFO] parking.detection: Detection worker stopped for camera 1

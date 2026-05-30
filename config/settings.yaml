@@ -13,22 +13,24 @@ model:
   device: "cpu"              # "cpu" or "cuda:0"
   confidence_threshold: 0.25
   iou_nms: 0.45
-  target_classes: [3]        # COCO: 3 = motorcycle
+  target_classes: [1,2,3]        # COCO: 3 = motorcycle
 
 layout:
   path: "layout.json"
 
 # ── Decision thresholds (M4) ─────────────────────────────────────
+# Tuned for side-view CCTV cameras with closely-packed motorcycles.
+# Lower iou_* values because side-view bboxes overlap slot polygons less.
 thresholds:
-  iou_lo:    0.30
-  iou_hi:    0.50
-  conf_lo:   0.50
-  conf_hi:   0.70
-  occlusion: 0.60
+  iou_lo:    0.05    # any bbox overlap → candidate for UNKNOWN
+  iou_hi:    0.15    # good overlap → OCCUPIED (with conf_hi)
+  conf_lo:   0.25    # min confidence for anchor-inside check
+  conf_hi:   0.40    # min confidence for iou_hi check
+  occlusion: 0.50
 
 # ── Timing (seconds) ─────────────────────────────────────────────
 timing:
-  tau_park:  5.0     # dwell to confirm OCCUPIED
+  tau_park:  2.0     # dwell to confirm OCCUPIED
   tau_leave: 3.0     # dwell to confirm EMPTY
   tau_unk:   1.5     # dwell to enter UNKNOWN
   tau_viol:  30.0    # dwell in no-park zone before alert

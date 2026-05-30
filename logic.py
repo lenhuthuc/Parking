@@ -23,18 +23,29 @@ from geometry import (
 from detector import Detection
 from layout import SlotDef, ZoneDef
 
-# ─────────────────────────── constants ──────────────────────────────
+# ─────────────────────────── thresholds (read from config) ──────────
 
-IOU_LO   = 0.15
-IOU_HI   = 0.30
-CONF_LO  = 0.25
-CONF_HI  = 0.45
-OCC_THR  = 0.60   # occlusion threshold
+def _load_thresholds():
+    try:
+        from config import cfg
+        t = cfg.thresholds
+        ti = cfg.timing
+        return (
+            float(t.iou_lo),
+            float(t.iou_hi),
+            float(t.conf_lo),
+            float(t.conf_hi),
+            float(getattr(t, 'occlusion', 0.60)),
+            float(getattr(ti, 'tau_park',  2.0)),
+            float(getattr(ti, 'tau_leave', 3.0)),
+            float(getattr(ti, 'tau_unk',   1.5)),
+            float(getattr(ti, 'tau_viol',  30.0)),
+        )
+    except Exception:
+        return (0.10, 0.20, 0.25, 0.40, 0.60, 2.0, 3.0, 1.5, 30.0)
 
-TAU_PARK  = 2.0   # seconds: consecutive "occupied" before slot → OCCUPIED
-TAU_LEAVE = 3.0   # seconds: consecutive "empty"    before slot → EMPTY
-TAU_UNK   = 1.5   # seconds: consecutive "unknown"  before slot → UNKNOWN
-TAU_VIOL  = 30.0  # seconds: dwell in no-park zone before alert
+(IOU_LO, IOU_HI, CONF_LO, CONF_HI, OCC_THR,
+ TAU_PARK, TAU_LEAVE, TAU_UNK, TAU_VIOL) = _load_thresholds()
 
 
 # ─────────────────────────── enums ──────────────────────────────────
@@ -113,13 +124,25 @@ class MatchResult:
     anchor_inside: bool = False
 
 
+def _any_anchor_inside(bbox, polygon) -> bool:
+    """Check bottom-center, center, and bottom-1/3 of bbox against polygon."""
+    x1, y1, x2, y2 = bbox
+    cx = (x1 + x2) / 2.0
+    candidates = [
+        (cx, y2),                        # bottom-center (front wheel)
+        (cx, (y1 + y2) / 2.0),          # center of bbox
+        (cx, y1 + (y2 - y1) * 2.0 / 3), # bottom third
+    ]
+    return any(point_in_polygon(px, py, polygon) for px, py in candidates)
+
+
 def match_slot(slot: SlotDef,
                detections: List[Detection],
                candidate_indices: List[int]) -> MatchResult:
     """
     Find the detection best associated with *slot*.
     - candidate_indices: pre-filtered by spatial grid (broad-phase)
-    - Greedy: pick the box with highest IoU; use anchor as tie-breaker
+    - Greedy: pick the box with highest IoU; use anchor tie-breaker
     - Accumulate occlusion from non-winning boxes that overlap the slot
     """
     best_det: Optional[Detection] = None
@@ -130,8 +153,7 @@ def match_slot(slot: SlotDef,
     for idx in candidate_indices:
         det = detections[idx]
         iou = polygon_iou(det.bbox, slot.polygon, slot.area)
-        anchor = anchor_point(det.bbox)
-        anchor_inside = point_in_polygon(anchor[0], anchor[1], slot.polygon)
+        anchor_inside = _any_anchor_inside(det.bbox, slot.polygon)
 
         if anchor_inside or iou > 0:
             if iou > best_iou or (anchor_inside and not best_anchor_inside):
