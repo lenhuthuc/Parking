@@ -214,6 +214,7 @@ def decide_raw_state(iou: float, conf: float, occ: float,
 class SlotMemory:
     state: SlotState = SlotState.EMPTY
     hold: int = 0          # frames raw has been different from state
+    last_raw: Optional[RawState] = None  # track last raw state for stale-EMPTY guard
 
 
 def _threshold(current: SlotState, raw: RawState,
@@ -233,6 +234,8 @@ def update_state_machine(mem: SlotMemory, raw: RawState,
     Hysteresis FSM.  Returns a new SlotMemory.
     - raw matches current state → reset hold counter.
     - raw differs → increment hold; flip state once hold ≥ threshold.
+    - stale-EMPTY guard: if current state is OCCUPIED and raw is EMPTY
+      but last_raw was UNKNOWN, do not count this frame (hold stays 0).
     """
     raw_as_slot = {
         RawState.EMPTY:    SlotState.EMPTY,
@@ -241,15 +244,22 @@ def update_state_machine(mem: SlotMemory, raw: RawState,
     }[raw]
 
     if raw_as_slot == mem.state:
-        return SlotMemory(state=mem.state, hold=0)
+        return SlotMemory(state=mem.state, hold=0, last_raw=raw)
+
+    # Stale-EMPTY guard: protect against spurious EMPTY transitions
+    if (mem.state == SlotState.OCCUPIED 
+            and raw == RawState.EMPTY 
+            and mem.last_raw == RawState.UNKNOWN):
+        # Don't count this frame as a transition; reset hold
+        return SlotMemory(state=mem.state, hold=0, last_raw=raw)
 
     new_hold = mem.hold + 1
     threshold = _threshold(mem.state, raw, n_park, n_leave, n_unk)
 
     if new_hold >= threshold:
-        return SlotMemory(state=raw_as_slot, hold=0)
+        return SlotMemory(state=raw_as_slot, hold=0, last_raw=raw)
 
-    return SlotMemory(state=mem.state, hold=new_hold)
+    return SlotMemory(state=mem.state, hold=new_hold, last_raw=raw)
 
 
 # ─────────────────────────── violation check ────────────────────────
