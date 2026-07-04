@@ -150,3 +150,38 @@ def aabbs_overlap(a: Tuple[float, float, float, float],
                   b: Tuple[float, float, float, float]) -> bool:
     """Fast AABB overlap test."""
     return not (a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1])
+
+
+def footpoint_coverage(bbox: Tuple[float, float, float, float],
+                       slot_polygon: Polygon,
+                       slot_area: float) -> float:
+    """
+    Footpoint coverage: intersection area of bottom 1/3 of bbox
+    (vehicle footprint region) with slot_polygon.
+    Returns: ratio of footprint area covered by the slot.
+    """
+    x1, y1, x2, y2 = bbox
+    foot_y1 = y1 + (y2 - y1) * 2.0 / 3.0  # bottom third
+    foot_bbox = (x1, foot_y1, x2, y2)
+    
+    foot_poly = bbox_to_polygon(foot_bbox)
+    inter_poly = sutherland_hodgman(foot_poly, slot_polygon)
+    inter_area = shoelace_area(inter_poly) if len(inter_poly) >= 3 else 0.0
+    
+    foot_area = (x2 - x1) * (y2 - foot_y1)
+    if foot_area <= 0:
+        return 0.0
+    return min(inter_area / foot_area, 1.0)
+
+
+def is_heavily_occluded(occ_ratio: float, threshold: float = 0.70) -> bool:
+    """Check if slot is heavily occluded (default 70% threshold)."""
+    return occ_ratio >= threshold
+
+
+def is_too_dark(confidence: float, brightness_threshold: float = 0.25) -> bool:
+    """
+    Heuristic: if detection confidence is very low and no vehicle detected,
+    assume too-dark condition. (More sophisticated: frame histogram analysis.)
+    """
+    return confidence < brightness_threshold
